@@ -18,8 +18,6 @@ fn main() {
     App::build()
         .insert_resource(WindowDescriptor {
             title: "CS434 lab1".to_string(),
-            cursor_visible: false,
-            cursor_locked: true,
             ..Default::default()
         })
         .add_plugins(DefaultPlugins)
@@ -40,6 +38,9 @@ struct WindmillFin {
 }
 struct Bullet {
     dir: Vec3
+}
+struct Scores {
+    score: usize,
 }
 
 /// set up a simple 3D scene
@@ -111,6 +112,9 @@ fn setup(
             transform: Transform::from_xyz(4.0, 8.0, 4.0),
             ..Default::default()
         })
+        .insert_resource(Scores {
+            score: 0
+        })
         // camera
         .spawn(PerspectiveCameraBundle {
             transform: Transform::from_xyz(-2.0, 2.5, 5.0)
@@ -177,6 +181,10 @@ fn mouse_fin_bullet_system(
                 window.set_cursor_lock_mode(false);
                 window.set_cursor_visibility(true);
             }
+            else if event.state == ElementState::Pressed && key_code == KeyCode::Return {
+                spawn_bullet();
+                return;
+            }
         }
     }
 
@@ -190,9 +198,8 @@ fn mouse_fin_bullet_system(
                 button: MouseButton::Left,
                 state: ElementState::Pressed,
             } => {
-                // Calculate bullet location
-
                 spawn_bullet();
+                return;
             },
             _ => (),
         }
@@ -204,6 +211,7 @@ fn bullet_windmill_destruction_system(
     time: Res<Time>,
     mut bullet_query: Query<(Entity, &mut Bullet, &mut Transform)>,
     mut windmill_query: Query<(Entity, &mut Windmill, &Transform)>,
+    mut scores: ResMut<Scores>
 ) {
     for (bullet_entity, mut bullet, mut transform) in bullet_query.iter_mut() {
         transform.translation += bullet.dir * time.delta_seconds() * 5.0;
@@ -221,6 +229,11 @@ fn bullet_windmill_destruction_system(
                 if fin_to_destroy_index == 3 {
                     commands.despawn(windmill_entity);
                     commands.despawn(bullet_entity);
+                    scores.score += 1;
+                    println!("Current score: {}", scores.score);
+                    if scores.score == 10 {
+                        println!("You win!");
+                    }
                     break;
                 }
                 bullet.dir = -bullet.dir;
