@@ -7,6 +7,11 @@ use bevy::render::camera::{ActiveCameras, PerspectiveProjection};
 use std::ops::Mul;
 use bevy::input::keyboard::KeyboardInput;
 
+use bevy::reflect::TypeUuid;
+
+pub const BULLET_MESH_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 13148362314412771389);
+
 fn main() {
     App::build()
         .insert_resource(WindowDescriptor {
@@ -30,7 +35,9 @@ struct Windmill {
 struct WindmillFin {
     index: usize,
 }
-struct Bomb;
+struct Bullet {
+    dir: Vec3
+};
 
 /// set up a simple 3D scene
 fn setup(
@@ -57,6 +64,8 @@ fn setup(
         longitudes: 32,
         uv_profile: Default::default()
     }));
+
+    meshes.set_untracked(BULLET_MESH_HANDLE, Mesh::from(shape::Icosphere { radius: 0.25, subdivisions: 16 }));
     for i in 0..10 {
         let x = rng.gen_range(-15.0..15.0);
         let z = rng.gen_range(-15.0..15.0);
@@ -96,13 +105,6 @@ fn setup(
             transform: Transform::from_xyz(4.0, 8.0, 4.0),
             ..Default::default()
         })
-        // Bomb
-        .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Icosphere { radius: 0.25, subdivisions: 16 })),
-            material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
-            ..Default::default()
-        })
-        .with(Bomb)
         // camera
         .spawn(PerspectiveCameraBundle {
             transform: Transform::from_xyz(-2.0, 2.5, 5.0)
@@ -139,9 +141,9 @@ fn mouse_fin_destruction_system(
     mut keyboard_input_events: EventReader<KeyboardInput>,
     mut mouse_button_input_events: EventReader<MouseButtonInput>,
     active_cameras: Res<ActiveCameras>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     camera_query: Query<(&Transform), With<PerspectiveProjection>>,
     mut windmill_query: Query<(Entity, &mut Windmill, &Transform)>,
-    mut bomb_query: Query<(&mut Transform), With<Bomb>>,
 ) {
     let window = windows.get_primary_mut().unwrap();
     for event in keyboard_input_events.iter() {
@@ -164,13 +166,12 @@ fn mouse_fin_destruction_system(
     // Calculate bomb location
     let camera_transform = camera_query.get(camera).unwrap();
     let ray = camera_transform.rotation.mul(Vec3::new(0.0, 0.0, 1.0));
-    let t = camera_transform.translation.y / -ray.y;
-    let x = camera_transform.translation.x + ray.x * t;
-    let z = camera_transform.translation.z + ray.z * t;
 
-    for mut transform in bomb_query.iter_mut() {
-        transform.translation = Vec3::new(x, 0.0, z);
-    }
+    commands.spawn(PbrBundle {
+        mesh: BULLET_MESH_HANDLE.typed(),
+        material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
+        ..Default::default()
+    });
 
 
     for event in mouse_button_input_events.iter() {
