@@ -148,6 +148,28 @@ fn mouse_fin_bullet_system(
     active_cameras: Res<ActiveCameras>,
     camera_query: Query<(&Transform), With<PerspectiveProjection>>,
 ) {
+    let camera = if let Some(camera) = active_cameras.get("Camera3d") {
+        camera
+    } else {
+        return;
+    };
+    let mut spawn_bullet = || {
+        let camera_transform = camera_query.get(camera).unwrap();
+        let ray = camera_transform.rotation.mul(Vec3::new(0.0, 0.0, -1.0));
+
+        commands.spawn(PbrBundle {
+            mesh: BULLET_MESH_HANDLE.typed(),
+            material: BULLET_MATERIAL_HANDLE.typed(),
+            transform: Transform {
+                translation: camera_transform.translation,
+                ..Transform::default()
+            },
+            ..Default::default()
+        })
+            .with(Bullet {
+                dir: ray,
+            });
+    };
     let window = windows.get_primary_mut().unwrap();
     for event in keyboard_input_events.iter() {
         if let Some(key_code) = event.key_code {
@@ -158,11 +180,7 @@ fn mouse_fin_bullet_system(
         }
     }
 
-    let camera = if let Some(camera) = active_cameras.get("Camera3d") {
-        camera
-    } else {
-        return;
-    };
+
 
     for event in mouse_button_input_events.iter() {
         window.set_cursor_lock_mode(true);
@@ -173,22 +191,8 @@ fn mouse_fin_bullet_system(
                 state: ElementState::Pressed,
             } => {
                 // Calculate bullet location
-                let camera_transform = camera_query.get(camera).unwrap();
-                let ray = camera_transform.rotation.mul(Vec3::new(0.0, 0.0, -1.0));
 
-                commands.spawn(PbrBundle {
-                    mesh: BULLET_MESH_HANDLE.typed(),
-                    material: BULLET_MATERIAL_HANDLE.typed(),
-                    transform: Transform {
-                        translation: camera_transform.translation,
-                        ..Transform::default()
-                    },
-                    ..Default::default()
-                })
-                    .with(Bullet {
-                        dir: ray,
-                    });
-
+                spawn_bullet();
             },
             _ => (),
         }
@@ -198,10 +202,10 @@ fn mouse_fin_bullet_system(
 fn bullet_windmill_destruction_system(
     mut commands: &mut Commands,
     time: Res<Time>,
-    mut bullet_query: Query<(Entity, &Bullet, &mut Transform)>,
+    mut bullet_query: Query<(Entity, &mut Bullet, &mut Transform)>,
     mut windmill_query: Query<(Entity, &mut Windmill, &Transform)>,
 ) {
-    for (bullet_entity, bullet, mut transform) in bullet_query.iter_mut() {
+    for (bullet_entity, mut bullet, mut transform) in bullet_query.iter_mut() {
         transform.translation += bullet.dir * time.delta_seconds() * 5.0;
         if transform.translation.y < 0.0 || transform.translation.z.abs() > 25.0 || transform.translation.x.abs() > 25.0 {
             commands.despawn(bullet_entity);
@@ -211,13 +215,15 @@ fn bullet_windmill_destruction_system(
             if (windmill_transform.translation.x - transform.translation.x).abs() < 1.0 &&
                 (windmill_transform.translation.y - transform.translation.y).abs() < 3.0 &&
                 (windmill_transform.translation.z - transform.translation.z).abs() < 1.0 {
-                commands.despawn(bullet_entity);
+
 
                 let fin_to_destroy_index = windmill.state;
                 if fin_to_destroy_index == 3 {
                     commands.despawn(windmill_entity);
+                    commands.despawn(bullet_entity);
                     break;
                 }
+                bullet.dir = -bullet.dir;
                 let fin_to_destroy = windmill.fins[fin_to_destroy_index].take().unwrap();
                 windmill.state += 1;
                 commands.despawn(fin_to_destroy);
