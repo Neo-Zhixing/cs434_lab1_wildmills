@@ -11,6 +11,8 @@ use bevy::reflect::TypeUuid;
 
 pub const BULLET_MESH_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Mesh::TYPE_UUID, 13148362314412771389);
+pub const BULLET_MATERIAL_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(StandardMaterial::TYPE_UUID, 13148362314412771390);
 
 fn main() {
     App::build()
@@ -24,7 +26,8 @@ fn main() {
         .add_plugin(FlyCameraPlugin)
         .add_startup_system(setup.system())
         .add_system(fan_rotation_system.system())
-        .add_system(mouse_fin_destruction_system.system())
+        .add_system(mouse_fin_bullet_system.system())
+        .add_system(bullet_windmill_destruction_system.system())
         .run();
 }
 
@@ -37,7 +40,7 @@ struct WindmillFin {
 }
 struct Bullet {
     dir: Vec3
-};
+}
 
 /// set up a simple 3D scene
 fn setup(
@@ -65,7 +68,10 @@ fn setup(
         uv_profile: Default::default()
     }));
 
-    meshes.set_untracked(BULLET_MESH_HANDLE, Mesh::from(shape::Icosphere { radius: 0.25, subdivisions: 16 }));
+    meshes.set_untracked(BULLET_MESH_HANDLE, Mesh::from(shape::Icosphere { radius: 0.05, subdivisions: 12 }));
+    materials.set_untracked(BULLET_MATERIAL_HANDLE, Color::rgb(1.0, 0.0, 0.0).into());
+
+    let windmill_material = materials.add(Color::rgb(0.8, 0.7, 0.6).into());
     for i in 0..10 {
         let x = rng.gen_range(-15.0..15.0);
         let z = rng.gen_range(-15.0..15.0);
@@ -73,7 +79,7 @@ fn setup(
         for i in 0..3 {
             commands.spawn(PbrBundle {
                 mesh: windmill_fan_mesh.clone(),
-                material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+                material: windmill_material.clone(),
                 transform: Transform::from_xyz(x, 2.0, z),
                 ..Default::default()
             })
@@ -84,7 +90,7 @@ fn setup(
         }
         commands.spawn(PbrBundle {
             mesh: windmill_rod_mesh.clone(),
-            material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+            material: windmill_material.clone(),
             transform: Transform::from_xyz(x, 2.0, z),
             ..Default::default()
         })
@@ -115,7 +121,6 @@ fn setup(
 }
 
 fn fan_rotation_system(
-    commands: &mut Commands,
     time: Res<Time>,
     windmill_query: Query<(&Windmill, &Transform)>,
     mut windmill_fins_query: Query<(&WindmillFin, &mut Transform)>
@@ -135,15 +140,13 @@ fn fan_rotation_system(
     }
 }
 
-fn mouse_fin_destruction_system(
+fn mouse_fin_bullet_system(
     mut commands: &mut Commands,
     mut windows: ResMut<Windows>,
     mut keyboard_input_events: EventReader<KeyboardInput>,
     mut mouse_button_input_events: EventReader<MouseButtonInput>,
     active_cameras: Res<ActiveCameras>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     camera_query: Query<(&Transform), With<PerspectiveProjection>>,
-    mut windmill_query: Query<(Entity, &mut Windmill, &Transform)>,
 ) {
     let window = windows.get_primary_mut().unwrap();
     for event in keyboard_input_events.iter() {
@@ -161,19 +164,6 @@ fn mouse_fin_destruction_system(
         return;
     };
 
-
-
-    // Calculate bomb location
-    let camera_transform = camera_query.get(camera).unwrap();
-    let ray = camera_transform.rotation.mul(Vec3::new(0.0, 0.0, 1.0));
-
-    commands.spawn(PbrBundle {
-        mesh: BULLET_MESH_HANDLE.typed(),
-        material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
-        ..Default::default()
-    });
-
-
     for event in mouse_button_input_events.iter() {
         window.set_cursor_lock_mode(true);
         window.set_cursor_visibility(false);
@@ -182,23 +172,57 @@ fn mouse_fin_destruction_system(
                 button: MouseButton::Left,
                 state: ElementState::Pressed,
             } => {
-                for (entity, mut windmill, transform) in windmill_query.iter_mut() {
-                    if (transform.translation.x - x).abs() < 0.5 && (transform.translation.z - z).abs() < 0.5 {
-                        // hit!
-                        let fin_to_destroy_index = windmill.state;
-                        if fin_to_destroy_index == 3 {
-                            commands.despawn(entity);
-                            break;
-                        }
-                        let fin_to_destroy = windmill.fins[fin_to_destroy_index].take().unwrap();
-                        windmill.state += 1;
-                        commands.despawn(fin_to_destroy);
-                        break;
-                    }
-                }
+                // Calculate bullet location
+                let camera_transform = camera_query.get(camera).unwrap();
+                let ray = camera_transform.rotation.mul(Vec3::new(0.0, 0.0, -1.0));
+
+                commands.spawn(PbrBundle {
+                    mesh: BULLET_MESH_HANDLE.typed(),
+                    material: BULLET_MATERIAL_HANDLE.typed(),
+                    transform: Transform {
+                        translation: camera_transform.translation,
+                        ..Transform::default()
+                    },
+                    ..Default::default()
+                })
+                    .with(Bullet {
+                        dir: ray,
+                    });
+
             },
             _ => (),
         }
     }
+}
 
+fn bullet_windmill_destruction_system(
+    mut commands: &mut Commands,
+    time: Res<Time>,
+    mut bullet_query: Query<(Entity, &Bullet, &mut Transform)>,
+    mut windmill_query: Query<(Entity, &mut Windmill, &Transform)>,
+) {
+    for (bullet_entity, bullet, mut transform) in bullet_query.iter_mut() {
+        transform.translation += bullet.dir * time.delta_seconds() * 5.0;
+        if transform.translation.y < 0.0 || transform.translation.z.abs() > 25.0 || transform.translation.x.abs() > 25.0 {
+            commands.despawn(bullet_entity);
+            continue;
+        }
+        for (windmill_entity, mut windmill, windmill_transform) in windmill_query.iter_mut() {
+            if (windmill_transform.translation.x - transform.translation.x).abs() < 1.0 &&
+                (windmill_transform.translation.y - transform.translation.y).abs() < 3.0 &&
+                (windmill_transform.translation.z - transform.translation.z).abs() < 1.0 {
+                commands.despawn(bullet_entity);
+
+                let fin_to_destroy_index = windmill.state;
+                if fin_to_destroy_index == 3 {
+                    commands.despawn(windmill_entity);
+                    break;
+                }
+                let fin_to_destroy = windmill.fins[fin_to_destroy_index].take().unwrap();
+                windmill.state += 1;
+                commands.despawn(fin_to_destroy);
+                break;
+            }
+        }
+    }
 }
